@@ -1,0 +1,22 @@
+{
+  "name": "ivr",
+  "version": "1.0.0",
+  "description": "<!-- Initiate a new Node.js project --> npm init -y <!-- Install Node dependacies --> npm install ws node-vad mic @google-cloud/speech <!-- Export keys --> export OPENAI_API_KEY=your_api_key_here export GOOGLE_APPLICATION_CREDENTIALS=\"/path/to/your/credentials.json\" <!-- Run the Node script --> node app.js",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@google-cloud/speech": "^6.7.0",
+    "dotenv": "^16.4.5",
+    "mic": "^2.1.2",
+    "node-vad": "^1.1.4",
+    "node-wav": "^0.0.2",
+    "openai": "^4.67.1",
+    "ws": "^8.18.0"
+  }
+}

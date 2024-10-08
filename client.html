@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-time Audio Interaction</title>
+</head>
+<body>
+    <h1>Real-time Audio Interaction</h1>
+    <button id="startRecording">Start Recording</button>
+    <button id="stopRecording" disabled>Stop Recording</button>
+    <div id="status"></div>
+
+    <script>
+        let ws;
+        let audioContext;
+        let mediaStreamSource;
+        let processor;
+        let isRecording = false;
+        let audioQueue = [];
+        let isPlaying = false;
+
+        const startButton = document.getElementById('startRecording');
+        const stopButton = document.getElementById('stopRecording');
+        const statusDiv = document.getElementById('status');
+
+        startButton.onclick = startRecording;
+        stopButton.onclick = stopRecording;
+
+        function startRecording() {
+            ws = new WebSocket('ws://localhost:8080');
+            audioQueue = [];
+            isPlaying = false;
+            
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                statusDiv.textContent = 'WebSocket connected. You can start speaking.';
+                navigator.mediaDevices.getUserMedia({ audio: true })
+                    .then(stream => {
+                        audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+                        mediaStreamSource = audioContext.createMediaStreamSource(stream);
+                        processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+                        mediaStreamSource.connect(processor);
+                        processor.connect(audioContext.destination);
+
+                        processor.onaudioprocess = (e) => {
+                            if (isRecording && ws.readyState === WebSocket.OPEN) {
+                                const inputData = e.inputBuffer.getChannelData(0);
+                                const pcm16 = convertToPCM16(inputData);
+                                ws.send(pcm16);
+                            }
+                        };
+
+                        isRecording = true;
+                    });
+                
+                startButton.disabled = true;
+                stopButton.disabled = false;
+            };
+
+            ws.onmessage = (event) => {
+                const response = JSON.parse(event.data);
+                console.log('Received message:', response.type);
+                if (response.type === 'audio_delta') {
+                    console.log('Received audio delta');
+                    const audioData = base64ToArrayBuffer(response.data);
+                    audioQueue.push(audioData);
+                    if (!isPlaying) {
+                        playNextAudioChunk();
+                    }
+                } else if (response.type === 'audio_end') {
+                    console.log('Received audio end signal');
+                    statusDiv.textContent = 'Audio response complete.';
+                } else if (response.type === 'error') {
+                    console.error('Error:', response.message);
+                    statusDiv.textContent = 'Error: ' + response.message;
+                }
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket Error:', error);
+                statusDiv.textContent = 'WebSocket error occurred.';
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket disconnected');
+                statusDiv.textContent = 'WebSocket disconnected.';
+            };
+        }
+
+        function stopRecording() {
+            console.log('Stopping recording');
+            isRecording = false;
+            if (processor) {
+                processor.disconnect();
+                mediaStreamSource.disconnect();
+            }
+            if (audioContext) {
+                audioContext.close();
+            }
+            ws.send('END_OF_AUDIO');
+            startButton.disabled = false;
+            stopButton.disabled = true;
+            statusDiv.textContent = 'Recording stopped. Waiting for audio response...';
+        }
+
+        function convertToPCM16(float32Array) {
+            const pcm16 = new Int16Array(float32Array.length);
+            for (let i = 0; i < float32Array.length; i++) {
+                const s = Math.max(-1, Math.min(1, float32Array[i]));
+                pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            }
+            return pcm16.buffer;
+        }
+
+        function base64ToArrayBuffer(base64) {
+            const binaryString = window.atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            return bytes.buffer;
+        }
+
+        function playNextAudioChunk() {
+            if (audioQueue.length === 0) {
+                isPlaying = false;
+                return;
+            }
+
+            isPlaying = true;
+            const audioData = audioQueue.shift();
+            const audioBuffer = audioContext.createBuffer(1, audioData.byteLength / 2, audioContext.sampleRate);
+            const channelData = audioBuffer.getChannelData(0);
+            const int16Array = new Int16Array(audioData);
+
+            for (let i = 0; i < int16Array.length; i++) {
+                channelData[i] = int16Array[i] / 32768;
+            }
+
+            const source = audioContext.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(audioContext.destination);
+            source.onended = playNextAudioChunk;
+            source.start();
+
+            statusDiv.textContent = 'Playing audio response...';
+        }
+    </script>
+</body>
+</html>
